@@ -1,4 +1,3 @@
-import clp from 'console-log-plus';
 import os, { EOL } from 'os';
 import { IS_PROD } from '../constants/env';
 import { APP_NAME, APP_VERSION } from '../constants/meta';
@@ -14,6 +13,17 @@ import { isConsoleError } from './errors';
 import { getMachineId } from '../helpers/identifiers';
 
 const { logFile } = PATHS;
+
+// Safe console styling for Electron
+const safeLog = (type, title, message) => {
+  if (type === 'info') {
+    if (!isEmpty(title)) console.log(`\x1b[42m\x1b[37m ${title} \x1b[0m`);
+    if (!isEmpty(message)) console.log(`\x1b[34m${message}\x1b[0m`);
+  } else {
+    if (!isEmpty(title)) console.log(`\x1b[41m\x1b[37m ${title} \x1b[0m`);
+    if (!isEmpty(message)) console.error(`\x1b[31m${message}\x1b[0m`);
+  }
+};
 
 export const log = {
   printBoundary(char = '═', length = 70, allowInProd = false) {
@@ -36,20 +46,7 @@ export const log = {
       return;
     }
 
-    if (!isEmpty(title)) {
-      clp({
-        color: 'white',
-        background: 'green',
-        message: title,
-      });
-    }
-
-    if (!isEmpty(e)) {
-      clp({
-        color: 'blue',
-        message: e,
-      });
-    }
+    safeLog('info', title, e);
   },
 
   /**
@@ -67,18 +64,7 @@ export const log = {
       return;
     }
 
-    if (!isEmpty(title)) {
-      clp({
-        color: 'white',
-        background: 'red',
-        message: title,
-      });
-    }
-
-    clp({
-      color: 'red',
-      message: e,
-    });
+    safeLog('error', title, e);
   },
 
   /**

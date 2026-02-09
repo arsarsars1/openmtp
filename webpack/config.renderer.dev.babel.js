@@ -270,9 +270,12 @@ export default merge(baseConfig, {
     before() {
       if (process.env.START_HOT) {
         console.info('Starting Main Process...');
+        const _env = { ...process.env };
+        delete _env.NODE_OPTIONS;
+        
         spawn('npm', ['run', 'start-main-dev'], {
           shell: true,
-          env: process.env,
+          env: _env,
           stdio: 'inherit',
         })
           .on('close', (code) => process.exit(code))
