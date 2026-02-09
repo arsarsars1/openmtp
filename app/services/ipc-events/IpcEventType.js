@@ -16,4 +16,13 @@ export class IpcEvents {
     'ipc.reportBugsDisposeMtpReply.fromMain';
 
   static USB_HOTPLUG = 'ipc.usbHotplug';
+
+  // Permission events
+  static PERMISSION_STATUS = 'ipc.permission.status';
+
+  static REQUEST_PERMISSION_CHECK = 'ipc.permission.requestCheck';
+
+  static OPEN_PERMISSION_SETTINGS = 'ipc.permission.openSettings';
+
+  static PERMISSION_CHECK_RESULT = 'ipc.permission.checkResult';
 }

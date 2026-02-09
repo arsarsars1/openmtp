@@ -32,6 +32,11 @@ import { IpcEvents } from './services/ipc-events/IpcEventType';
 import IpcEventService from './services/ipc-events/IpcEventHandler';
 import { isKalamModeSupported } from './helpers/binaries';
 import { fileExistsSync } from './helpers/fileOps';
+import {
+  checkFullDiskAccess,
+  openFullDiskAccessPreferences,
+  getPermissionMessage,
+} from './helpers/permissionHelper';
 
 const remote = getRemoteWindow();
 
@@ -39,6 +44,10 @@ const isSingleInstance = app.requestSingleInstanceLock();
 const isDeviceBootable = bootTheDevice();
 const isMas = electronIs.mas();
 let mainWindow = null;
+
+if (process.env.NODE_ENV === 'development') {
+  app.setName(APP_TITLE);
+}
 
 if (IS_PROD) {
   const sourceMapSupport = require('source-map-support');
@@ -159,6 +168,24 @@ async function createWindow() {
         mainWindow.show();
         mainWindow.focus();
       }
+
+      // Check permissions after window is ready and send status to renderer
+      setTimeout(async () => {
+        try {
+          const status = await checkFullDiskAccess();
+          const permissionInfo = getPermissionMessage(status);
+
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send(IpcEvents.PERMISSION_STATUS, {
+              status,
+              ...permissionInfo,
+              isAuthorized: status === 'authorized' || status === 'unsupported',
+            });
+          }
+        } catch (e) {
+          log.error(e, 'main.dev -> startup permission check');
+        }
+      }, 1500); // Delay to let the UI load first
     });
 
     mainWindow.onerror = (error) => {
@@ -249,6 +276,37 @@ if (!isDeviceBootable) {
   });
 
   IpcEventService.shared.start();
+
+  // Permission check and send to renderer
+  const checkAndSendPermissionStatus = async () => {
+    if (!mainWindow) return;
+
+    try {
+      const status = await checkFullDiskAccess();
+      const permissionInfo = getPermissionMessage(status);
+
+      mainWindow.webContents.send(IpcEvents.PERMISSION_STATUS, {
+        status,
+        ...permissionInfo,
+        isAuthorized: status === 'authorized' || status === 'unsupported',
+      });
+    } catch (e) {
+      log.error(e, 'main.dev -> checkAndSendPermissionStatus');
+    }
+  };
+
+  // IPC handlers for permission requests
+  ipcMain.on(IpcEvents.REQUEST_PERMISSION_CHECK, async () => {
+    await checkAndSendPermissionStatus();
+  });
+
+  ipcMain.on(IpcEvents.OPEN_PERMISSION_SETTINGS, async () => {
+    try {
+      await openFullDiskAccessPreferences();
+    } catch (e) {
+      log.error(e, 'main.dev -> OPEN_PERMISSION_SETTINGS');
+    }
+  });
 
   app
     .whenReady()

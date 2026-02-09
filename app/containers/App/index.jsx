@@ -30,6 +30,8 @@ import { getMainWindowRendererProcess } from '../../helpers/windowHelper';
 import { log } from '../../utils/log';
 import { makeMtpDevice, makeMtpStoragesList } from '../HomePage/selectors';
 import { analyticsService } from '../../services/analytics';
+import { PermissionDialog } from '../../components/DialogBox';
+import { IpcEvents } from '../../services/ipc-events/IpcEventType';
 
 class App extends Component {
   constructor(props) {
@@ -38,6 +40,13 @@ class App extends Component {
     this.mainWindowRendererProcess = getMainWindowRendererProcess();
 
     this.allowWritingJsonToSettings = false;
+
+    this.state = {
+      permissionDialogOpen: false,
+      permissionTitle: '',
+      permissionMessage: '',
+      permissionShowButton: true,
+    };
   }
 
   componentWillMount() {
@@ -57,12 +66,42 @@ class App extends Component {
   componentDidMount() {
     try {
       ipcRenderer.on('nativeThemeUpdated', this.nativeThemeUpdatedEvent);
+      ipcRenderer.on(IpcEvents.PERMISSION_STATUS, this.handlePermissionStatus);
 
       bootLoader.cleanRotationFiles();
     } catch (e) {
       log.error(e, `App -> componentDidMount`);
     }
   }
+
+  handlePermissionStatus = (event, { isAuthorized, title, message, showButton }) => {
+    if (!isAuthorized) {
+      this.setState({
+        permissionDialogOpen: true,
+        permissionTitle: title,
+        permissionMessage: message,
+        permissionShowButton: showButton,
+      });
+    } else {
+      this.setState({
+        permissionDialogOpen: false,
+      });
+    }
+  };
+
+  handlePermissionOpenSettings = () => {
+    ipcRenderer.send(IpcEvents.OPEN_PERMISSION_SETTINGS);
+  };
+
+  handlePermissionCheckAgain = () => {
+    ipcRenderer.send(IpcEvents.REQUEST_PERMISSION_CHECK);
+  };
+
+  handlePermissionDismiss = () => {
+    this.setState({
+      permissionDialogOpen: false,
+    });
+  };
 
   componentWillUnmount() {
     this.deregisterAccelerators();
@@ -75,6 +114,7 @@ class App extends Component {
       'nativeThemeUpdated',
       () => {}
     );
+    ipcRenderer.removeListener(IpcEvents.PERMISSION_STATUS, this.handlePermissionStatus);
   }
 
   nativeThemeUpdatedEvent = () => {
@@ -141,6 +181,7 @@ class App extends Component {
 
   render() {
     const { classes: styles, mtpDevice, mtpStoragesList, mtpMode } = this.props;
+    const { permissionDialogOpen, permissionTitle, permissionMessage, permissionShowButton } = this.state;
     const muiTheme = this.getMuiTheme();
 
     return (
@@ -155,6 +196,15 @@ class App extends Component {
           <Alerts />
           <ErrorBoundary>
             <SettingsDialog />
+            <PermissionDialog
+              open={permissionDialogOpen}
+              title={permissionTitle}
+              message={permissionMessage}
+              showOpenSettingsButton={permissionShowButton}
+              onOpenSettings={this.handlePermissionOpenSettings}
+              onCheckAgain={this.handlePermissionCheckAgain}
+              onDismiss={this.handlePermissionDismiss}
+            />
             <Routes />
           </ErrorBoundary>
         </MuiThemeProvider>

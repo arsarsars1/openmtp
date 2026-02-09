@@ -19,13 +19,47 @@ import { isArray, isEmpty, undefinedOrNull } from '../../../utils/funcs';
 import { pathUp } from '../../../utils/files';
 import { appDateFormat } from '../../../utils/date';
 import { checkIf } from '../../../utils/checkIf';
+import { ipcRenderer } from 'electron';
 import { PATHS } from '../../../constants/paths';
 import { NODE_MAC_PERMISSIONS_MIN_OS } from '../../../constants';
+import {
+  checkFullDiskAccess,
+  getPermissionMessage,
+  askForFolderAccess,
+} from '../../../helpers/permissionHelper';
+import { IpcEvents } from '../../../services/ipc-events/IpcEventType';
 
 export class FileExplorerLocalDataSource {
   constructor() {
     this.readdir = promisify(fsReaddir);
   }
+
+  _triggerPermissionDialog = async (status) => {
+    if (ipcRenderer) {
+      const permissionInfo = getPermissionMessage(status);
+      ipcRenderer.send(IpcEvents.PERMISSION_CHECK_RESULT, {
+        status,
+        ...permissionInfo,
+        isAuthorized: false,
+      });
+      // Also trigger the status event that the App listens to
+      // We simulate receiving it from main, but since we are in renderer we can just Dispatch?
+      // Actually App listens to ipcRenderer.on(IpcEvents.PERMISSION_STATUS)
+      // We can emit it locally? No, we should probably send a request to main to broadcast it,
+      // OR just update the state if we were in a component.
+      // But we are in a class.
+      // Easiest is to send a message to main "PLEASE_BROADCAST_PERMISSION_STATUS" ?
+      // Or since App listens to IpcEvents.PERMISSION_STATUS, we can maybe emit it on ipcRenderer if that works?
+      // No, ipcRenderer emits events from Main.
+      
+      // Let's use the new event specific for this: PERMISSION_CHECK_RESULT, but App doesn't listen to it yet.
+      // App listens to PERMISSION_STATUS.
+      // Let's modify App to also listen to a local event or just request main to check.
+      
+      // Better yet: request main to check and broadcast.
+      ipcRenderer.send(IpcEvents.REQUEST_PERMISSION_CHECK);
+    }
+  };
 
   /**
    * description - make directory helper
@@ -115,29 +149,35 @@ export class FileExplorerLocalDataSource {
       return true;
     }
 
-    const { askForFoldersAccess, askForPhotosAccess } = await import(
-      // eslint-disable-next-line import/no-unresolved
-      'node-mac-permissions'
-    );
-
     checkIf(filePath, 'string');
 
     const isGrantedString = 'authorized';
-
     let result;
 
     if (filePath.startsWith(PATHS.desktopDir)) {
-      result = await askForFoldersAccess('desktop');
+      result = await askForFolderAccess('desktop');
     } else if (filePath.startsWith(PATHS.downloadsDir)) {
-      result = await askForFoldersAccess('downloads');
+      result = await askForFolderAccess('downloads');
     } else if (filePath.startsWith(PATHS.documentsDir)) {
-      result = await askForFoldersAccess('documents');
+      result = await askForFolderAccess('documents');
     } else if (filePath.startsWith(PATHS.picturesDir)) {
-      result = await askForPhotosAccess();
+      result = await askForFolderAccess('pictures');
     }
 
     if (undefinedOrNull(result)) {
       return true;
+    }
+
+    if (result !== isGrantedString) {
+      // If folder access is denied, check if we have Full Disk Access
+      // This is because sometimes folder access might be tricky or we want to fallback
+      const fullDiskStatus = await checkFullDiskAccess();
+      if (fullDiskStatus === 'authorized') {
+        return true;
+      }
+      
+      // If denied, trigger the dialog
+      await this._triggerPermissionDialog(fullDiskStatus);
     }
 
     return result === isGrantedString;
@@ -214,6 +254,19 @@ export class FileExplorerLocalDataSource {
 
       if (error) {
         log.error(error, `FileExplorerLocalDataSource.listFiles`);
+
+        // Check for permission errors
+        if (
+          error.code === 'EPERM' || 
+          error.code === 'EACCES' || 
+          (error.message && error.message.includes('Operation not permitted'))
+        ) {
+          const fullDiskStatus = await checkFullDiskAccess();
+          if (fullDiskStatus !== 'authorized') {
+            await this._triggerPermissionDialog(fullDiskStatus);
+            return { error: 'Permission denied', data: null };
+          }
+        }
 
         return { error, data: null };
       }
@@ -297,6 +350,18 @@ export class FileExplorerLocalDataSource {
           `FileExplorerLocalDataSource.renameFile -> mv error`
         );
 
+        // Check for permission errors
+        if (
+          error.code === 'EPERM' || 
+          error.code === 'EACCES' || 
+          (error.message && error.message.includes('Operation not permitted'))
+        ) {
+          const fullDiskStatus = await checkFullDiskAccess();
+          if (fullDiskStatus !== 'authorized') {
+            await this._triggerPermissionDialog(fullDiskStatus);
+          }
+        }
+
         return { error, stderr: null, data: false };
       }
 
@@ -342,6 +407,18 @@ export class FileExplorerLocalDataSource {
             `FileExplorerLocalDataSource.deleteFiles -> rm error`
           );
 
+          // Check for permission errors
+          if (
+            error.code === 'EPERM' || 
+            error.code === 'EACCES' || 
+            (error.message && error.message.includes('Operation not permitted'))
+          ) {
+            const fullDiskStatus = await checkFullDiskAccess();
+            if (fullDiskStatus !== 'authorized') {
+              await this._triggerPermissionDialog(fullDiskStatus);
+            }
+          }
+
           return { error, stderr: null, data: false };
         }
       }
@@ -385,6 +462,18 @@ export class FileExplorerLocalDataSource {
           `${error}`,
           `FileExplorerLocalDataSource.makeDirectory -> mkdir error`
         );
+
+        // Check for permission errors
+        if (
+          error.code === 'EPERM' || 
+          error.code === 'EACCES' || 
+          (error.message && error.message.includes('Operation not permitted'))
+        ) {
+          const fullDiskStatus = await checkFullDiskAccess();
+          if (fullDiskStatus !== 'authorized') {
+            await this._triggerPermissionDialog(fullDiskStatus);
+          }
+        }
 
         return { error, stderr: null, data: false };
       }
